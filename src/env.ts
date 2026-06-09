@@ -18,10 +18,8 @@ const envSchema = z.object({
   SUPABASE_S3_SECRET_ACCESS_KEY: z.string().optional(),
   SUPABASE_STORAGE_BUCKET: z.string().default("meeting-recordings"),
   TRANSCRIPTION_SERVICE_URL: z.string().default("http://localhost:8000"),
-  AI_PROVIDER: z.string().default("openai"),
-  OPENAI_API_KEY: z.string().optional(),
-  OPENAI_MODEL: z.string().default("gpt-4.1-mini")
+  GEMINI_API_KEY: z.string().optional(),
+  GEMINI_MODEL: z.string().default("gemini-1.5-flash")
 });
 
 export const env = envSchema.parse(process.env);
-
