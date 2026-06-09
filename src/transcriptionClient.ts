@@ -1,5 +1,11 @@
+import { Agent } from "undici";
 import { env } from "./env.js";
 import type { TranscriptionResult } from "./types.js";
+
+const transcriptionAgent = new Agent({
+  headersTimeout: env.TRANSCRIPTION_REQUEST_TIMEOUT_MS,
+  bodyTimeout: env.TRANSCRIPTION_REQUEST_TIMEOUT_MS
+});
 
 export async function transcribeRecording(input: {
   buffer: Buffer;
@@ -15,8 +21,9 @@ export async function transcribeRecording(input: {
 
   const response = await fetch(`${env.TRANSCRIPTION_SERVICE_URL}/transcribe`, {
     method: "POST",
-    body: form
-  });
+    body: form,
+    dispatcher: transcriptionAgent
+  } as RequestInit & { dispatcher: Agent });
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -25,4 +32,3 @@ export async function transcribeRecording(input: {
 
   return (await response.json()) as TranscriptionResult;
 }
-
