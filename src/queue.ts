@@ -1,6 +1,7 @@
 import { Queue, type ConnectionOptions } from "bullmq";
 import { Redis } from "ioredis";
 import { env } from "./env.js";
+import { logFlow } from "./logger.js";
 
 export const TRANSCRIPTION_REQUEST_QUEUE = "transcription:requests";
 export const TRANSCRIPTION_RESULT_QUEUE = "transcription:results";
@@ -16,6 +17,11 @@ export const meetingProcessingQueue = new Queue("meeting-processing", {
 });
 
 export async function enqueueMeetingProcessing(meetingId: string): Promise<string> {
+  logFlow("bullmq.meeting_processing.enqueue_started", {
+    meetingId,
+    queue: "meeting-processing"
+  });
+
   const job = await meetingProcessingQueue.add(
     "process-meeting",
     { meetingId },
@@ -29,6 +35,13 @@ export async function enqueueMeetingProcessing(meetingId: string): Promise<strin
       removeOnFail: 100
     }
   );
+
+  logFlow("bullmq.meeting_processing.enqueue_completed", {
+    meetingId,
+    queue: "meeting-processing",
+    bullmqJobId: job.id
+  });
+
   return job.id ?? "";
 }
 
@@ -40,6 +53,14 @@ export async function enqueueTranscriptionRequest(input: {
   mimeType: string;
 }): Promise<void> {
   await redisConnection.lpush(TRANSCRIPTION_REQUEST_QUEUE, JSON.stringify(input));
+  logFlow("redis.transcription_request.enqueued", {
+    meetingId: input.meetingId,
+    queue: TRANSCRIPTION_REQUEST_QUEUE,
+    storageBucket: input.storageBucket,
+    storageKey: input.storageKey,
+    filename: input.filename,
+    mimeType: input.mimeType
+  });
 }
 
 function parseRedisUrl(redisUrl: string): ConnectionOptions {

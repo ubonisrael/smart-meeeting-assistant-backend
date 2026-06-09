@@ -8,6 +8,7 @@ import {
   redisConnection,
   TRANSCRIPTION_RESULT_QUEUE
 } from "./queue.js";
+import { logFlow, logFlowError } from "./logger.js";
 
 await migrateDatabase();
 
@@ -24,18 +25,27 @@ const worker = new Worker(
 );
 
 worker.on("completed", (job) => {
-  console.log(`Completed meeting processing job ${job.id}`);
+  logFlow("bullmq.meeting_processing.completed", {
+    bullmqJobId: job.id,
+    meetingId: job.data.meetingId
+  });
 });
 
 worker.on("failed", (job, error) => {
-  console.error(`Failed meeting processing job ${job?.id}:`, error);
+  logFlowError("bullmq.meeting_processing.failed", {
+    bullmqJobId: job?.id,
+    meetingId: job?.data.meetingId,
+    error: error.message
+  });
 });
 
 void listenForTranscriptionResults();
 
 async function processMeeting(meetingId: string): Promise<void> {
   try {
+    logFlow("meeting.processing.started", { meetingId });
     await setMeetingStatus(meetingId, "transcribing");
+    logFlow("meeting.status.updated", { meetingId, status: "transcribing" });
 
     const fileResult = await pool.query<{
       storage_bucket: string;
@@ -56,6 +66,14 @@ async function processMeeting(meetingId: string): Promise<void> {
       throw new Error("Meeting file not found");
     }
 
+    logFlow("meeting.transcription_request.prepare", {
+      meetingId,
+      storageBucket: file.storage_bucket,
+      storageKey: file.storage_key,
+      filename: file.original_filename,
+      mimeType: file.mime_type
+    });
+
     await enqueueTranscriptionRequest({
       meetingId,
       storageBucket: file.storage_bucket,
@@ -67,12 +85,20 @@ async function processMeeting(meetingId: string): Promise<void> {
       "UPDATE processing_jobs SET status = 'transcription_queued', updated_at = now() WHERE meeting_id = $1",
       [meetingId]
     );
+    logFlow("meeting.processing_job.updated", {
+      meetingId,
+      status: "transcription_queued"
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown processing error";
     await pool.query(
       "UPDATE meetings SET status = 'failed', failed_reason = $2, updated_at = now() WHERE id = $1",
       [meetingId, message]
     );
+    logFlowError("meeting.processing.failed", {
+      meetingId,
+      error: message
+    });
     throw error;
   }
 }
@@ -95,7 +121,9 @@ type TranscriptionQueueResult =
 
 async function listenForTranscriptionResults(): Promise<void> {
   const resultConnection = redisConnection.duplicate();
-  console.log(`Listening for transcription results on ${TRANSCRIPTION_RESULT_QUEUE}`);
+  logFlow("redis.transcription_result.listener_started", {
+    queue: TRANSCRIPTION_RESULT_QUEUE
+  });
 
   while (true) {
     try {
@@ -105,9 +133,16 @@ async function listenForTranscriptionResults(): Promise<void> {
       }
       const [, rawPayload] = item;
       const payload = JSON.parse(rawPayload) as TranscriptionQueueResult;
+      logFlow("redis.transcription_result.received", {
+        meetingId: payload.meetingId,
+        queue: TRANSCRIPTION_RESULT_QUEUE,
+        status: payload.status
+      });
       await processTranscriptionResult(payload);
     } catch (error) {
-      console.error("Failed to process transcription result:", error);
+      logFlowError("redis.transcription_result.processing_failed", {
+        error: error instanceof Error ? error.message : "Unknown transcription result processing error"
+      });
       await wait(2000);
     }
   }
@@ -119,10 +154,21 @@ async function processTranscriptionResult(payload: TranscriptionQueueResult): Pr
       "UPDATE meetings SET status = 'failed', failed_reason = $2, updated_at = now() WHERE id = $1",
       [payload.meetingId, payload.error]
     );
+    logFlowError("meeting.transcription.failed", {
+      meetingId: payload.meetingId,
+      error: payload.error
+    });
     return;
   }
 
   const transcription = payload.transcription;
+  logFlow("meeting.transcription.completed", {
+    meetingId: payload.meetingId,
+    language: transcription.language,
+    transcriptCharacters: transcription.text.length,
+    segmentCount: transcription.segments.length
+  });
+
   await withTransaction(async (client) => {
     const transcriptResult = await client.query<{ id: string }>(
       `INSERT INTO transcripts (meeting_id, text, language)
@@ -143,8 +189,14 @@ async function processTranscriptionResult(payload: TranscriptionQueueResult): Pr
       );
     }
   });
+  logFlow("meeting.transcript.persisted", {
+    meetingId: payload.meetingId,
+    segmentCount: transcription.segments.length
+  });
 
   await setMeetingStatus(payload.meetingId, "summarizing");
+  logFlow("meeting.status.updated", { meetingId: payload.meetingId, status: "summarizing" });
+  logFlow("meeting.summary.started", { meetingId: payload.meetingId });
   const summary = await generateSummary(transcription.text);
   await pool.query(
     `INSERT INTO summaries (meeting_id, overview, decisions, risks, next_steps)
@@ -162,8 +214,16 @@ async function processTranscriptionResult(payload: TranscriptionQueueResult): Pr
       JSON.stringify(summary.nextSteps)
     ]
   );
+  logFlow("meeting.summary.completed", {
+    meetingId: payload.meetingId,
+    decisionsCount: summary.decisions.length,
+    risksCount: summary.risks.length,
+    nextStepsCount: summary.nextSteps.length
+  });
 
   await setMeetingStatus(payload.meetingId, "extracting_action_items");
+  logFlow("meeting.status.updated", { meetingId: payload.meetingId, status: "extracting_action_items" });
+  logFlow("meeting.action_items.started", { meetingId: payload.meetingId });
   const actionItems = await extractActionItems(transcription.text);
   await withTransaction(async (client) => {
     await client.query("DELETE FROM action_items WHERE meeting_id = $1", [payload.meetingId]);
@@ -182,12 +242,21 @@ async function processTranscriptionResult(payload: TranscriptionQueueResult): Pr
       );
     }
   });
+  logFlow("meeting.action_items.completed", {
+    meetingId: payload.meetingId,
+    actionItemCount: actionItems.length
+  });
 
   await setMeetingStatus(payload.meetingId, "completed");
+  logFlow("meeting.status.updated", { meetingId: payload.meetingId, status: "completed" });
   await pool.query(
     "UPDATE processing_jobs SET status = 'completed', updated_at = now() WHERE meeting_id = $1",
     [payload.meetingId]
   );
+  logFlow("meeting.flow.completed", {
+    meetingId: payload.meetingId,
+    status: "completed"
+  });
 }
 
 function wait(ms: number): Promise<void> {

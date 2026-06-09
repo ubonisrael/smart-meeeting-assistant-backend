@@ -8,6 +8,7 @@ import { enqueueMeetingProcessing } from "../queue.js";
 import { buildStorageKey, uploadRecording } from "../storage.js";
 import { requireAuth } from "../auth.js";
 import { env } from "../env.js";
+import { logFlow } from "../logger.js";
 
 const router = Router();
 const upload = multer({
@@ -55,6 +56,14 @@ router.post("/upload", upload.single("recording"), async (req, res, next) => {
       ? req.body.title.trim()
       : req.file.originalname;
 
+    logFlow("meeting.upload.received", {
+      userId: req.user.id,
+      title,
+      filename: req.file.originalname,
+      mimeType: req.file.mimetype,
+      sizeBytes: req.file.size
+    });
+
     const meeting = await withTransaction(async (client) => {
       const meetingResult = await client.query<{ id: string }>(
         `INSERT INTO meetings (user_id, title, status)
@@ -65,10 +74,25 @@ router.post("/upload", upload.single("recording"), async (req, res, next) => {
       const meetingId = meetingResult.rows[0].id;
       const storageKey = buildStorageKey(req.user?.id ?? "", meetingId, req.file?.originalname ?? "recording");
 
+      logFlow("meeting.upload.storage_started", {
+        meetingId,
+        userId: req.user?.id,
+        storageBucket: env.SUPABASE_STORAGE_BUCKET,
+        storageKey,
+        sizeBytes: req.file?.size
+      });
+
       await uploadRecording({
         key: storageKey,
         body: req.file?.buffer ?? Buffer.alloc(0),
         contentType: req.file?.mimetype ?? "application/octet-stream"
+      });
+
+      logFlow("meeting.upload.storage_completed", {
+        meetingId,
+        userId: req.user?.id,
+        storageBucket: env.SUPABASE_STORAGE_BUCKET,
+        storageKey
       });
 
       await client.query(
@@ -93,10 +117,21 @@ router.post("/upload", upload.single("recording"), async (req, res, next) => {
     });
 
     const jobId = await enqueueMeetingProcessing(meeting.id);
+    logFlow("meeting.processing_job.queued", {
+      meetingId: meeting.id,
+      bullmqJobId: jobId,
+      queue: "meeting-processing"
+    });
+
     await pool.query(
       "INSERT INTO processing_jobs (meeting_id, queue_job_id, status) VALUES ($1, $2, 'queued')",
       [meeting.id, jobId]
     );
+
+    logFlow("meeting.upload.accepted", {
+      meetingId: meeting.id,
+      status: "processing"
+    });
 
     res.status(202).json({
       meetingId: meeting.id,
@@ -307,4 +342,3 @@ async function searchMeetingContext(userId: string, query: string, limit: number
 }
 
 export { router as meetingRoutes };
-
