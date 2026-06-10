@@ -2,9 +2,8 @@ import { GoogleGenAI, createPartFromUri, createUserContent } from "@google/genai
 import { mkdtemp, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { env } from "./env.js";
-import { logFlow, logFlowError } from "./logger.js";
-import type { TranscriptionResult, TranscriptSegment } from "./types.js";
+import { env } from "../config/env.js";
+import { logFlow, logFlowError } from "../utils/logger.js";
 
 type GeminiTranscriptPayload = {
   language?: string;
@@ -182,3 +181,4 @@ function parseSeconds(value: number | string): number {
 
   return value.split(":").reduce((total, part) => total * 60 + Number(part), 0);
 }
+

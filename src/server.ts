@@ -1,6 +1,6 @@
 import { createApp } from "./app.js";
-import { migrateDatabase } from "./db.js";
-import { env } from "./env.js";
+import { migrateDatabase } from "./config/database.js";
+import { env } from "./config/env.js";
 
 await migrateDatabase();
 
@@ -8,4 +8,3 @@ const app = createApp();
 app.listen(env.PORT, () => {
   console.log(`Backend listening on port ${env.PORT}`);
 });
-

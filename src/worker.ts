@@ -1,11 +1,10 @@
 import { Worker } from "bullmq";
-import { generateSummary, extractActionItems } from "./ai.js";
-import { migrateDatabase, pool, withTransaction } from "./db.js";
-import { downloadRecording } from "./storage.js";
-import { bullMQConnection } from "./queue.js";
-import { logFlow, logFlowError } from "./logger.js";
-import { transcribeRecordingWithGemini } from "./transcription.js";
-import type { TranscriptionResult } from "./types.js";
+import { migrateDatabase, pool, withTransaction } from "./config/database.js";
+import { extractActionItems, generateSummary } from "./services/aiService.js";
+import { bullMQConnection } from "./services/queueService.js";
+import { downloadRecording } from "./services/storageService.js";
+import { transcribeRecordingWithGemini } from "./services/transcriptionService.js";
+import { logFlow, logFlowError } from "./utils/logger.js";
 
 await migrateDatabase();
 

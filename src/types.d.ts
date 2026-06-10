@@ -1,10 +1,10 @@
-export type AuthUser = {
+type AuthUser = {
   id: string;
   email: string;
   name: string;
 };
 
-export type MeetingStatus =
+type MeetingStatus =
   | "uploaded"
   | "processing"
   | "transcribing"
@@ -13,30 +13,36 @@ export type MeetingStatus =
   | "completed"
   | "failed";
 
-export type TranscriptSegment = {
+type TranscriptSegment = {
   start: number;
   end: number;
   text: string;
 };
 
-export type TranscriptionResult = {
+type TranscriptionResult = {
   text: string;
   segments: TranscriptSegment[];
   language?: string;
 };
 
-export type SummaryResult = {
+type SummaryResult = {
   overview: string;
   decisions: string[];
   risks: string[];
   nextSteps: string[];
 };
 
-export type ActionItemResult = {
+type ActionItemResult = {
   assignee?: string;
   task: string;
   deadline?: string;
   sourceText?: string;
   confidence?: number;
 };
+
+declare namespace Express {
+  interface Request {
+    user?: AuthUser;
+  }
+}
 

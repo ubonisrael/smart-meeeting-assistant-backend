@@ -1,7 +1,7 @@
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { Readable } from "node:stream";
-import { env } from "./env.js";
-import { HttpError } from "./errors.js";
+import { env } from "../config/env.js";
+import { HttpError } from "../utils/errors.js";
 
 function assertStorageConfigured(): void {
   if (!env.SUPABASE_S3_ENDPOINT || !env.SUPABASE_S3_ACCESS_KEY_ID || !env.SUPABASE_S3_SECRET_ACCESS_KEY) {

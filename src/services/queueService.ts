@@ -1,7 +1,7 @@
 import { Queue, type ConnectionOptions } from "bullmq";
 import { Redis } from "ioredis";
-import { env } from "./env.js";
-import { logFlow } from "./logger.js";
+import { env } from "../config/env.js";
+import { logFlow } from "../utils/logger.js";
 
 export const redisConnection = new Redis(env.REDIS_URL, {
   maxRetriesPerRequest: null
@@ -53,3 +53,4 @@ function parseRedisUrl(redisUrl: string): ConnectionOptions {
     maxRetriesPerRequest: null
   };
 }
+

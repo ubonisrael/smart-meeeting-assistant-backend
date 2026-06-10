@@ -3,7 +3,7 @@ import express from "express";
 import helmet from "helmet";
 import { authRoutes } from "./routes/authRoutes.js";
 import { meetingRoutes } from "./routes/meetingRoutes.js";
-import { errorHandler } from "./errors.js";
+import { errorHandler } from "./utils/errors.js";
 
 export function createApp() {
   const app = express();
@@ -22,4 +22,3 @@ export function createApp() {
 
   return app;
 }
-

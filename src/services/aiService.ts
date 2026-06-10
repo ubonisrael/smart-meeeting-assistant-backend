@@ -1,5 +1,4 @@
-import { env } from "./env.js";
-import type { ActionItemResult, SummaryResult } from "./types.js";
+import { env } from "../config/env.js";
 
 type GeminiResponse = {
   candidates?: Array<{
@@ -133,3 +132,4 @@ export async function answerQuestion(question: string, contexts: string[]): Prom
 
   return content ?? "I could not generate an answer.";
 }
+
