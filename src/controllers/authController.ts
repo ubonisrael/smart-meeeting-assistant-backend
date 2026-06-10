@@ -1,11 +1,12 @@
 import type { Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import {
+  getUserById,
   loginUser,
-  logoutSession,
-  refreshSession,
   registerUser
 } from "../services/authService.js";
+import { env } from "../config/env.js";
+import { HttpError } from "../utils/errors.js";
 
 const registerSchema = z.object({
   email: z.string().email(),
@@ -18,15 +19,18 @@ const loginSchema = z.object({
   password: z.string().min(1)
 });
 
-const refreshSchema = z.object({
-  refreshToken: z.string().min(1)
-});
-
 export async function register(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const input = registerSchema.parse(req.body);
     const response = await registerUser(input);
-    res.status(201).json(response);
+    req.session.userId = response.user.id;
+    req.session.save((error) => {
+      if (error) {
+        next(error);
+        return;
+      }
+      res.status(201).json(response);
+    });
   } catch (error) {
     next(error);
   }
@@ -36,7 +40,14 @@ export async function login(req: Request, res: Response, next: NextFunction): Pr
   try {
     const input = loginSchema.parse(req.body);
     const response = await loginUser(input);
-    res.json(response);
+    req.session.userId = response.user.id;
+    req.session.save((error) => {
+      if (error) {
+        next(error);
+        return;
+      }
+      res.json(response);
+    });
   } catch (error) {
     next(error);
   }
@@ -44,9 +55,12 @@ export async function login(req: Request, res: Response, next: NextFunction): Pr
 
 export async function refresh(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const input = refreshSchema.parse(req.body);
-    const response = await refreshSession(input.refreshToken);
-    res.json(response);
+    if (!req.session.userId) {
+      throw new HttpError(401, "Authentication required");
+    }
+
+    const user = await getUserById(req.session.userId);
+    res.json({ user });
   } catch (error) {
     next(error);
   }
@@ -54,9 +68,14 @@ export async function refresh(req: Request, res: Response, next: NextFunction): 
 
 export async function logout(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const input = refreshSchema.parse(req.body);
-    await logoutSession(input.refreshToken);
-    res.status(204).send();
+    req.session.destroy((error) => {
+      if (error) {
+        next(error);
+        return;
+      }
+      res.clearCookie(env.SESSION_COOKIE_NAME);
+      res.status(204).send();
+    });
   } catch (error) {
     next(error);
   }
@@ -65,4 +84,3 @@ export async function logout(req: Request, res: Response, next: NextFunction): P
 export function me(req: Request, res: Response): void {
   res.json({ user: req.user });
 }
-

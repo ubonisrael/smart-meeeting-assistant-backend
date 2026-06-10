@@ -1,15 +1,6 @@
-import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
-import jwt, { type SignOptions } from "jsonwebtoken";
 import { pool } from "../config/database.js";
-import { env } from "../config/env.js";
 import { HttpError } from "../utils/errors.js";
-
-type TokenPayload = {
-  sub: string;
-  email: string;
-  name: string;
-};
 
 export async function registerUser(input: {
   email: string;
@@ -22,10 +13,7 @@ export async function registerUser(input: {
     [input.email.toLowerCase(), input.name, passwordHash]
   );
 
-  const user = result.rows[0];
-  const refreshToken = createRefreshToken();
-  await storeRefreshToken(user.id, refreshToken);
-  return authResponse(user, refreshToken);
+  return authResponse(result.rows[0]);
 }
 
 export async function loginUser(input: { email: string; password: string }) {
@@ -38,40 +26,24 @@ export async function loginUser(input: { email: string; password: string }) {
     throw new HttpError(401, "Invalid email or password");
   }
 
-  const user = { id: userRecord.id, email: userRecord.email, name: userRecord.name };
-  const refreshToken = createRefreshToken();
-  await storeRefreshToken(user.id, refreshToken);
-  return authResponse(user, refreshToken);
+  return authResponse({
+    id: userRecord.id,
+    email: userRecord.email,
+    name: userRecord.name
+  });
 }
 
-export async function refreshSession(refreshTokenInput: string) {
-  const tokenHash = hashRefreshToken(refreshTokenInput);
-  const result = await pool.query<AuthUser & { token_id: string }>(
-    `SELECT u.id, u.email, u.name, rt.id AS token_id
-     FROM refresh_tokens rt
-     JOIN users u ON u.id = rt.user_id
-     WHERE rt.token_hash = $1
-       AND rt.revoked_at IS NULL
-       AND rt.expires_at > now()`,
-    [tokenHash]
+export async function getUserById(userId: string): Promise<AuthUser> {
+  const result = await pool.query<AuthUser>(
+    "SELECT id, email, name FROM users WHERE id = $1",
+    [userId]
   );
-
-  const row = result.rows[0];
-  if (!row) {
-    throw new HttpError(401, "Invalid refresh token");
+  const user = result.rows[0];
+  if (!user) {
+    throw new HttpError(401, "Invalid session");
   }
 
-  await pool.query("UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1", [row.token_id]);
-  const user = { id: row.id, email: row.email, name: row.name };
-  const refreshToken = createRefreshToken();
-  await storeRefreshToken(user.id, refreshToken);
-  return authResponse(user, refreshToken);
-}
-
-export async function logoutSession(refreshTokenInput: string): Promise<void> {
-  await pool.query("UPDATE refresh_tokens SET revoked_at = now() WHERE token_hash = $1", [
-    hashRefreshToken(refreshTokenInput)
-  ]);
+  return user;
 }
 
 export async function hashPassword(password: string): Promise<string> {
@@ -82,47 +54,6 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
   return bcrypt.compare(password, hash);
 }
 
-export function signAccessToken(user: AuthUser): string {
-  const payload: TokenPayload = { sub: user.id, email: user.email, name: user.name };
-  return jwt.sign(payload, env.JWT_ACCESS_SECRET, { expiresIn: env.ACCESS_TOKEN_TTL } as SignOptions);
+function authResponse(user: AuthUser) {
+  return { user };
 }
-
-export function verifyAccessToken(token: string): AuthUser {
-  const decoded = jwt.verify(token, env.JWT_ACCESS_SECRET) as TokenPayload;
-  return {
-    id: decoded.sub,
-    email: decoded.email,
-    name: decoded.name
-  };
-}
-
-export function createRefreshToken(): string {
-  return crypto.randomBytes(48).toString("base64url");
-}
-
-export function hashRefreshToken(token: string): string {
-  return crypto.createHash("sha256").update(token).digest("hex");
-}
-
-export function refreshTokenExpiresAt(): Date {
-  const days = env.REFRESH_TOKEN_TTL.endsWith("d")
-    ? Number(env.REFRESH_TOKEN_TTL.replace("d", ""))
-    : 30;
-  return new Date(Date.now() + days * 24 * 60 * 60 * 1000);
-}
-
-export async function storeRefreshToken(userId: string, token: string): Promise<void> {
-  await pool.query(
-    "INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)",
-    [userId, hashRefreshToken(token), refreshTokenExpiresAt()]
-  );
-}
-
-function authResponse(user: AuthUser, refreshToken: string) {
-  return {
-    user,
-    accessToken: signAccessToken(user),
-    refreshToken
-  };
-}
-

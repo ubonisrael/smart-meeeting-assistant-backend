@@ -1,23 +1,20 @@
 import type { NextFunction, Request, Response } from "express";
-import { verifyAccessToken } from "../services/authService.js";
+import { getUserById } from "../services/authService.js";
 import { HttpError } from "../utils/errors.js";
 
 export async function requireAuth(req: Request, _res: Response, next: NextFunction): Promise<void> {
   try {
-    const header = req.headers.authorization;
-    if (!header?.startsWith("Bearer ")) {
-      throw new HttpError(401, "Missing bearer token");
+    if (!req.session.userId) {
+      throw new HttpError(401, "Authentication required");
     }
 
-    const token = header.slice("Bearer ".length);
-    req.user = verifyAccessToken(token);
+    req.user = await getUserById(req.session.userId);
     next();
   } catch (error) {
     if (error instanceof HttpError) {
       next(error);
       return;
     }
-    next(new HttpError(401, "Invalid or expired token"));
+    next(new HttpError(401, "Invalid session"));
   }
 }
-

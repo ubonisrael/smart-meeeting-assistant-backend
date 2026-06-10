@@ -8,10 +8,10 @@ const envSchema = z.object({
   PORT: z.coerce.number().default(4000),
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1),
-  JWT_ACCESS_SECRET: z.string().min(16),
-  JWT_REFRESH_SECRET: z.string().min(16),
-  ACCESS_TOKEN_TTL: z.string().default("15m"),
-  REFRESH_TOKEN_TTL: z.string().default("30d"),
+  CLIENT_ORIGIN: z.string().default("http://localhost:5173,http://localhost:3000"),
+  SESSION_SECRET: z.string().min(16),
+  SESSION_COOKIE_NAME: z.string().default("smart_meeting_assistant.sid"),
+  SESSION_TTL_MS: z.coerce.number().default(30 * 24 * 60 * 60 * 1000),
   SUPABASE_S3_ENDPOINT: z.string().optional(),
   SUPABASE_S3_REGION: z.string().default("us-east-1"),
   SUPABASE_S3_ACCESS_KEY_ID: z.string().optional(),
@@ -22,5 +22,7 @@ const envSchema = z.object({
   GEMINI_TRANSCRIPTION_MODEL: z.string().default("gemini-3.5-flash")
 });
 
-export const env = envSchema.parse(process.env);
-
+export const env = envSchema.parse({
+  ...process.env,
+  SESSION_SECRET: process.env.SESSION_SECRET ?? process.env.JWT_ACCESS_SECRET
+});
