@@ -3,9 +3,6 @@ import { Redis } from "ioredis";
 import { env } from "./env.js";
 import { logFlow } from "./logger.js";
 
-export const TRANSCRIPTION_REQUEST_QUEUE = "transcription:requests";
-export const TRANSCRIPTION_RESULT_QUEUE = "transcription:results";
-
 export const redisConnection = new Redis(env.REDIS_URL, {
   maxRetriesPerRequest: null
 });
@@ -43,24 +40,6 @@ export async function enqueueMeetingProcessing(meetingId: string): Promise<strin
   });
 
   return job.id ?? "";
-}
-
-export async function enqueueTranscriptionRequest(input: {
-  meetingId: string;
-  storageBucket: string;
-  storageKey: string;
-  filename: string;
-  mimeType: string;
-}): Promise<void> {
-  await redisConnection.lpush(TRANSCRIPTION_REQUEST_QUEUE, JSON.stringify(input));
-  logFlow("redis.transcription_request.enqueued", {
-    meetingId: input.meetingId,
-    queue: TRANSCRIPTION_REQUEST_QUEUE,
-    storageBucket: input.storageBucket,
-    storageKey: input.storageKey,
-    filename: input.filename,
-    mimeType: input.mimeType
-  });
 }
 
 function parseRedisUrl(redisUrl: string): ConnectionOptions {

@@ -17,9 +17,9 @@ const envSchema = z.object({
   SUPABASE_S3_ACCESS_KEY_ID: z.string().optional(),
   SUPABASE_S3_SECRET_ACCESS_KEY: z.string().optional(),
   SUPABASE_STORAGE_BUCKET: z.string().default("meeting-recordings"),
-  TRANSCRIPTION_SERVICE_URL: z.string().default("http://localhost:8000"),
   GEMINI_API_KEY: z.string().optional(),
-  GEMINI_MODEL: z.string().default("gemini-1.5-flash")
+  GEMINI_MODEL: z.string().default("gemini-1.5-flash"),
+  GEMINI_TRANSCRIPTION_MODEL: z.string().default("gemini-3.5-flash")
 });
 
 export const env = envSchema.parse(process.env);

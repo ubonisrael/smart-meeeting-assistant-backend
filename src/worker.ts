@@ -1,14 +1,11 @@
 import { Worker } from "bullmq";
 import { generateSummary, extractActionItems } from "./ai.js";
 import { migrateDatabase, pool, withTransaction } from "./db.js";
-import type { TranscriptionResult } from "./types.js";
-import {
-  enqueueTranscriptionRequest,
-  bullMQConnection,
-  redisConnection,
-  TRANSCRIPTION_RESULT_QUEUE
-} from "./queue.js";
+import { downloadRecording } from "./storage.js";
+import { bullMQConnection } from "./queue.js";
 import { logFlow, logFlowError } from "./logger.js";
+import { transcribeRecordingWithGemini } from "./transcription.js";
+import type { TranscriptionResult } from "./types.js";
 
 await migrateDatabase();
 
@@ -39,8 +36,6 @@ worker.on("failed", (job, error) => {
   });
 });
 
-void listenForTranscriptionResults();
-
 async function processMeeting(meetingId: string): Promise<void> {
   try {
     logFlow("meeting.processing.started", { meetingId });
@@ -66,7 +61,7 @@ async function processMeeting(meetingId: string): Promise<void> {
       throw new Error("Meeting file not found");
     }
 
-    logFlow("meeting.transcription_request.prepare", {
+    logFlow("meeting.transcription.started", {
       meetingId,
       storageBucket: file.storage_bucket,
       storageKey: file.storage_key,
@@ -74,20 +69,29 @@ async function processMeeting(meetingId: string): Promise<void> {
       mimeType: file.mime_type
     });
 
-    await enqueueTranscriptionRequest({
+    const recording = await downloadRecording(file.storage_key);
+    logFlow("meeting.recording.downloaded", {
       meetingId,
       storageBucket: file.storage_bucket,
       storageKey: file.storage_key,
+      sizeBytes: recording.length
+    });
+
+    const transcription = await transcribeRecordingWithGemini({
+      meetingId,
+      recording,
       filename: file.original_filename,
       mimeType: file.mime_type
     });
+
     await pool.query(
-      "UPDATE processing_jobs SET status = 'transcription_queued', updated_at = now() WHERE meeting_id = $1",
+      "UPDATE processing_jobs SET status = 'transcribed', updated_at = now() WHERE meeting_id = $1",
       [meetingId]
     );
-    logFlow("meeting.processing_job.updated", {
+    await processTranscriptionResult({
       meetingId,
-      status: "transcription_queued"
+      status: "completed",
+      transcription
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown processing error";
@@ -118,35 +122,6 @@ type TranscriptionQueueResult =
       status: "failed";
       error: string;
     };
-
-async function listenForTranscriptionResults(): Promise<void> {
-  const resultConnection = redisConnection.duplicate();
-  logFlow("redis.transcription_result.listener_started", {
-    queue: TRANSCRIPTION_RESULT_QUEUE
-  });
-
-  while (true) {
-    try {
-      const item = await resultConnection.brpop(TRANSCRIPTION_RESULT_QUEUE, 0);
-      if (!item) {
-        continue;
-      }
-      const [, rawPayload] = item;
-      const payload = JSON.parse(rawPayload) as TranscriptionQueueResult;
-      logFlow("redis.transcription_result.received", {
-        meetingId: payload.meetingId,
-        queue: TRANSCRIPTION_RESULT_QUEUE,
-        status: payload.status
-      });
-      await processTranscriptionResult(payload);
-    } catch (error) {
-      logFlowError("redis.transcription_result.processing_failed", {
-        error: error instanceof Error ? error.message : "Unknown transcription result processing error"
-      });
-      await wait(2000);
-    }
-  }
-}
 
 async function processTranscriptionResult(payload: TranscriptionQueueResult): Promise<void> {
   if (payload.status === "failed") {
@@ -256,11 +231,5 @@ async function processTranscriptionResult(payload: TranscriptionQueueResult): Pr
   logFlow("meeting.flow.completed", {
     meetingId: payload.meetingId,
     status: "completed"
-  });
-}
-
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
   });
 }
