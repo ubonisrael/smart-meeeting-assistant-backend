@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { Pool, type PoolClient } from "pg";
 import { env } from "./env.js";
@@ -30,17 +30,23 @@ export async function migrateDatabase(): Promise<void> {
     )
   `);
 
-  const migrationId = "001_init";
-  const existing = await pool.query("SELECT id FROM schema_migrations WHERE id = $1", [migrationId]);
-  if (existing.rowCount) {
-    return;
+  const migrationsDirectory = path.join(process.cwd(), "migrations");
+  const migrationFiles = (await readdir(migrationsDirectory))
+    .filter((fileName) => fileName.endsWith(".sql"))
+    .sort();
+
+  for (const fileName of migrationFiles) {
+    const migrationId = fileName.replace(/\.sql$/, "");
+    const existing = await pool.query("SELECT id FROM schema_migrations WHERE id = $1", [migrationId]);
+    if (existing.rowCount) {
+      continue;
+    }
+
+    const filePath = path.join(migrationsDirectory, fileName);
+    const sql = await readFile(filePath, "utf8");
+    await withTransaction(async (client) => {
+      await client.query(sql);
+      await client.query("INSERT INTO schema_migrations (id) VALUES ($1)", [migrationId]);
+    });
   }
-
-  const filePath = path.join(process.cwd(), "migrations", "001_init.sql");
-  const sql = await readFile(filePath, "utf8");
-  await withTransaction(async (client) => {
-    await client.query(sql);
-    await client.query("INSERT INTO schema_migrations (id) VALUES ($1)", [migrationId]);
-  });
 }
-

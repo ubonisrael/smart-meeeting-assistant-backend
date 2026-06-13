@@ -5,6 +5,8 @@ declare global {
     id: string;
     email: string;
     name: string;
+    emailVerifiedAt: string | null;
+    twoFactorEnabled: boolean;
   };
 
   type MeetingStatus =
@@ -53,6 +55,7 @@ declare global {
 declare module "express-session" {
   interface SessionData {
     userId?: string;
+    pendingTwoFactorSecret?: string;
   }
 }
 

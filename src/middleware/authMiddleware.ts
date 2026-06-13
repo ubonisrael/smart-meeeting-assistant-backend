@@ -8,7 +8,12 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
       throw new HttpError(401, "Authentication required");
     }
 
-    req.user = await getUserById(req.session.userId);
+    const user = await getUserById(req.session.userId);
+    if (!user.emailVerifiedAt) {
+      throw new HttpError(403, "Email verification required");
+    }
+
+    req.user = user;
     next();
   } catch (error) {
     if (error instanceof HttpError) {
