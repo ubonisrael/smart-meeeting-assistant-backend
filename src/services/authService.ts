@@ -366,10 +366,17 @@ async function consumeAuthToken(
 async function createTwoFactorLoginChallenge(userId: string): Promise<string> {
   const challengeToken = crypto.randomBytes(32).toString("base64url");
   const challengeHash = hashToken(challengeToken);
-  await pool.query(
-    "INSERT INTO two_factor_login_challenges (user_id, challenge_hash, expires_at) VALUES ($1, $2, $3)",
-    [userId, challengeHash, new Date(Date.now() + TWO_FACTOR_CHALLENGE_TTL_MS)],
-  );
+
+  await withTransaction(async (client) => {
+    await client.query(
+      "UPDATE two_factor_login_challenges SET consumed_at = now() WHERE user_id = $1 AND consumed_at IS NULL",
+      [userId],
+    );
+    await client.query(
+      "INSERT INTO two_factor_login_challenges (user_id, challenge_hash, expires_at) VALUES ($1, $2, $3)",
+      [userId, challengeHash, new Date(Date.now() + TWO_FACTOR_CHALLENGE_TTL_MS)],
+    );
+  });
 
   return challengeToken;
 }
