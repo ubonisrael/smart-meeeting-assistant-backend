@@ -13,6 +13,8 @@ const envSchema = z.object({
   SESSION_COOKIE_NAME: z.string().default("smart_meeting_assistant.sid"),
   SESSION_TTL_MS: z.coerce.number().default(30 * 24 * 60 * 60 * 1000),
   APP_URL: z.string().url().default("http://localhost:5173"),
+  SMTP_HOST: z.string().default("smtp.gmail.com"),
+  SMTP_PORT: z.coerce.number().default(587),
   SMTP_EMAIL_ADDRESS: z.string(),
   SMTP_PASSWORD: z.string(),
   SUPABASE_S3_ENDPOINT: z.string().optional(),

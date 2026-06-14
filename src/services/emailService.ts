@@ -2,19 +2,23 @@ import nodemailer from "nodemailer";
 import { env } from "../config/env.js";
 import { logFlow } from "../utils/logger.js";
 
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: env.SMTP_EMAIL_ADDRESS,
-    pass: env.SMTP_PASSWORD,
-  },
-});
+function createTransporter() {
+  return nodemailer.createTransport({
+    host: env.SMTP_HOST,
+    port: env.SMTP_PORT,
+    auth: {
+      user: env.SMTP_EMAIL_ADDRESS,
+      pass: env.SMTP_PASSWORD,
+    },
+  });
+}
 
 export async function sendVerificationEmail(
   user: AuthUser,
   token: string,
 ): Promise<void> {
   const verificationUrl = `${env.APP_URL}/verify-email?token=${encodeURIComponent(token)}`;
+  const name = escapeHtml(user.name);
   await sendMail({
     to: user.email,
     subject: "Verify your Smart Meeting Assistant email",
@@ -26,7 +30,7 @@ export async function sendVerificationEmail(
       "",
       "This link expires in 24 hours.",
     ].join("\n"),
-    html: `<p>Hi ${user.name},</p><p>Verify your email address to start using Smart Meeting Assistant.</p><p><a href="${verificationUrl}">Verify email</a></p><p>This link expires in 24 hours.</p>`,
+    html: `<p>Hi ${name},</p><p>Verify your email address to start using Smart Meeting Assistant.</p><p><a href="${verificationUrl}">Verify email</a></p><p>This link expires in 24 hours.</p>`,
   });
 }
 
@@ -35,6 +39,7 @@ export async function sendPasswordResetEmail(
   token: string,
 ): Promise<void> {
   const resetUrl = `${env.APP_URL}/reset-password?token=${encodeURIComponent(token)}`;
+  const name = escapeHtml(user.name);
   await sendMail({
     to: user.email,
     subject: "Reset your Smart Meeting Assistant password",
@@ -46,7 +51,7 @@ export async function sendPasswordResetEmail(
       "",
       "This link expires in 1 hour. If you did not request it, you can ignore this email.",
     ].join("\n"),
-    html: `<p>Hi ${user.name},</p><p>Use this link to reset your password.</p><p><a href="${resetUrl}">Reset password</a></p><p>This link expires in 1 hour. If you did not request it, you can ignore this email.</p>`,
+    html: `<p>Hi ${name},</p><p>Use this link to reset your password.</p><p><a href="${resetUrl}">Reset password</a></p><p>This link expires in 1 hour. If you did not request it, you can ignore this email.</p>`,
   });
 }
 
@@ -56,6 +61,7 @@ async function sendMail(input: {
   text: string;
   html: string;
 }): Promise<void> {
+  const transporter = createTransporter();
   const info = await transporter.sendMail({
     from: env.SMTP_EMAIL_ADDRESS,
     ...input,
@@ -65,6 +71,14 @@ async function sendMail(input: {
     to: input.to,
     subject: input.subject,
     messageId: info.messageId,
-    transport: "gmail",
+    transport: `${env.SMTP_HOST}:${env.SMTP_PORT}`,
   });
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
