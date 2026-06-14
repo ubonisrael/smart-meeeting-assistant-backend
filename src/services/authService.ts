@@ -1,9 +1,13 @@
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
+import QRCODE from "qrcode";
 import { generateSecret, generateURI, verifySync } from "otplib";
 import { pool, withTransaction } from "../config/database.js";
 import { HttpError } from "../utils/errors.js";
-import { sendPasswordResetEmail, sendVerificationEmail } from "./emailService.js";
+import {
+  sendPasswordResetEmail,
+  sendVerificationEmail,
+} from "./emailService.js";
 
 type AuthUserRow = {
   id: string;
@@ -37,11 +41,15 @@ export async function registerUser(input: {
       `INSERT INTO users (email, name, password_hash)
        VALUES ($1, $2, $3)
        RETURNING id, email, name, email_verified_at AS "emailVerifiedAt", two_factor_enabled AS "twoFactorEnabled"`,
-      [email, input.name, passwordHash]
+      [email, input.name, passwordHash],
     );
 
     const user = normalizeUser(result.rows[0]);
-    const token = await createAuthToken(user.id, "email_verification", EMAIL_VERIFICATION_TTL_MS);
+    const token = await createAuthToken(
+      user.id,
+      "email_verification",
+      EMAIL_VERIFICATION_TTL_MS,
+    );
     await sendVerificationEmail(user, token);
 
     return { user, emailVerificationRequired: true };
@@ -55,7 +63,10 @@ export async function registerUser(input: {
 
 export async function loginUser(input: { email: string; password: string }) {
   const userRecord = await getUserWithSecretsByEmail(input.email.toLowerCase());
-  if (!userRecord || !(await verifyPassword(input.password, userRecord.password_hash))) {
+  if (
+    !userRecord ||
+    !(await verifyPassword(input.password, userRecord.password_hash))
+  ) {
     throw new HttpError(401, "Invalid email or password");
   }
 
@@ -67,17 +78,23 @@ export async function loginUser(input: { email: string; password: string }) {
   if (userRecord.twoFactorEnabled) {
     return {
       twoFactorRequired: true,
-      challengeToken: await createTwoFactorLoginChallenge(user.id)
+      challengeToken: await createTwoFactorLoginChallenge(user.id),
     };
   }
 
   return authResponse(user);
 }
 
-export async function completeTwoFactorLogin(input: { challengeToken: string; code: string }) {
+export async function completeTwoFactorLogin(input: {
+  challengeToken: string;
+  code: string;
+}) {
   const user = await consumeTwoFactorLoginChallenge(input.challengeToken);
   const userRecord = await getUserWithSecretsById(user.id);
-  if (!userRecord?.two_factor_secret || !verifyTotp(input.code, userRecord.two_factor_secret)) {
+  if (
+    !userRecord?.two_factor_secret ||
+    !verifyTotp(input.code, userRecord.two_factor_secret)
+  ) {
     throw new HttpError(401, "Invalid two-factor code");
   }
 
@@ -89,7 +106,7 @@ export async function getUserById(userId: string): Promise<AuthUser> {
     `SELECT id, email, name, email_verified_at AS "emailVerifiedAt", two_factor_enabled AS "twoFactorEnabled"
      FROM users
      WHERE id = $1`,
-    [userId]
+    [userId],
   );
   const user = result.rows[0];
   if (!user) {
@@ -106,19 +123,25 @@ export async function verifyEmailToken(token: string) {
      SET email_verified_at = COALESCE(email_verified_at, now()), updated_at = now()
      WHERE id = $1
      RETURNING id, email, name, email_verified_at AS "emailVerifiedAt", two_factor_enabled AS "twoFactorEnabled"`,
-    [userId]
+    [userId],
   );
 
   return authResponse(normalizeUser(result.rows[0]));
 }
 
-export async function resendVerificationEmail(emailInput: string): Promise<void> {
+export async function resendVerificationEmail(
+  emailInput: string,
+): Promise<void> {
   const user = await getUserByEmail(emailInput.toLowerCase());
   if (!user || user.emailVerifiedAt) {
     return;
   }
 
-  const token = await createAuthToken(user.id, "email_verification", EMAIL_VERIFICATION_TTL_MS);
+  const token = await createAuthToken(
+    user.id,
+    "email_verification",
+    EMAIL_VERIFICATION_TTL_MS,
+  );
   await sendVerificationEmail(user, token);
 }
 
@@ -128,17 +151,24 @@ export async function requestPasswordReset(emailInput: string): Promise<void> {
     return;
   }
 
-  const token = await createAuthToken(user.id, "password_reset", PASSWORD_RESET_TTL_MS);
+  const token = await createAuthToken(
+    user.id,
+    "password_reset",
+    PASSWORD_RESET_TTL_MS,
+  );
   await sendPasswordResetEmail(user, token);
 }
 
-export async function resetPassword(input: { token: string; password: string }): Promise<void> {
+export async function resetPassword(input: {
+  token: string;
+  password: string;
+}): Promise<void> {
   const userId = await consumeAuthToken(input.token, "password_reset");
   const passwordHash = await hashPassword(input.password);
-  await pool.query("UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2", [
-    passwordHash,
-    userId
-  ]);
+  await pool.query(
+    "UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2",
+    [passwordHash, userId],
+  );
 }
 
 export async function updateProfile(userId: string, input: { name: string }) {
@@ -147,38 +177,45 @@ export async function updateProfile(userId: string, input: { name: string }) {
      SET name = $1, updated_at = now()
      WHERE id = $2
      RETURNING id, email, name, email_verified_at AS "emailVerifiedAt", two_factor_enabled AS "twoFactorEnabled"`,
-    [input.name, userId]
+    [input.name, userId],
   );
 
   return authResponse(normalizeUser(result.rows[0]));
 }
 
-export async function updatePassword(userId: string, input: { currentPassword: string; newPassword: string }): Promise<void> {
+export async function updatePassword(
+  userId: string,
+  input: { currentPassword: string; newPassword: string },
+): Promise<void> {
   const userRecord = await getUserWithSecretsById(userId);
-  if (!userRecord || !(await verifyPassword(input.currentPassword, userRecord.password_hash))) {
+  if (
+    !userRecord ||
+    !(await verifyPassword(input.currentPassword, userRecord.password_hash))
+  ) {
     throw new HttpError(401, "Current password is incorrect");
   }
 
   const passwordHash = await hashPassword(input.newPassword);
-  await pool.query("UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2", [
-    passwordHash,
-    userId
-  ]);
+  await pool.query(
+    "UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2",
+    [passwordHash, userId],
+  );
 }
 
-export function createTwoFactorSetup(user: AuthUser) {
+export async function createTwoFactorSetup(user: AuthUser) {
   const secret = generateSecret();
-  return {
+  const qrCodeUrl = await QRCODE.toDataURL(generateURI({
+    issuer: "Smart Meeting Assistant",
+    label: user.email,
     secret,
-    otpauthUrl: generateURI({
-      issuer: "Smart Meeting Assistant",
-      label: user.email,
-      secret
-    })
-  };
+  }));
+  return { secret, qrCodeUrl };
 }
 
-export async function enableTwoFactor(userId: string, input: { secret: string; code: string }) {
+export async function enableTwoFactor(
+  userId: string,
+  input: { secret: string; code: string },
+) {
   if (!verifyTotp(input.code, input.secret)) {
     throw new HttpError(400, "Invalid two-factor code");
   }
@@ -188,18 +225,27 @@ export async function enableTwoFactor(userId: string, input: { secret: string; c
      SET two_factor_enabled = true, two_factor_secret = $1, updated_at = now()
      WHERE id = $2
      RETURNING id, email, name, email_verified_at AS "emailVerifiedAt", two_factor_enabled AS "twoFactorEnabled"`,
-    [input.secret, userId]
+    [input.secret, userId],
   );
 
   return authResponse(normalizeUser(result.rows[0]));
 }
 
-export async function disableTwoFactor(userId: string, input: { password: string; code: string }) {
+export async function disableTwoFactor(
+  userId: string,
+  input: { password: string; code: string },
+) {
   const userRecord = await getUserWithSecretsById(userId);
-  if (!userRecord || !(await verifyPassword(input.password, userRecord.password_hash))) {
+  if (
+    !userRecord ||
+    !(await verifyPassword(input.password, userRecord.password_hash))
+  ) {
     throw new HttpError(401, "Password is incorrect");
   }
-  if (!userRecord.two_factor_secret || !verifyTotp(input.code, userRecord.two_factor_secret)) {
+  if (
+    !userRecord.two_factor_secret ||
+    !verifyTotp(input.code, userRecord.two_factor_secret)
+  ) {
     throw new HttpError(400, "Invalid two-factor code");
   }
 
@@ -208,7 +254,7 @@ export async function disableTwoFactor(userId: string, input: { password: string
      SET two_factor_enabled = false, two_factor_secret = NULL, updated_at = now()
      WHERE id = $1
      RETURNING id, email, name, email_verified_at AS "emailVerifiedAt", two_factor_enabled AS "twoFactorEnabled"`,
-    [userId]
+    [userId],
   );
 
   return authResponse(normalizeUser(result.rows[0]));
@@ -218,7 +264,10 @@ export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 12);
 }
 
-export async function verifyPassword(password: string, hash: string): Promise<boolean> {
+export async function verifyPassword(
+  password: string,
+  hash: string,
+): Promise<boolean> {
   return bcrypt.compare(password, hash);
 }
 
@@ -227,37 +276,45 @@ async function getUserByEmail(email: string): Promise<AuthUser | null> {
     `SELECT id, email, name, email_verified_at AS "emailVerifiedAt", two_factor_enabled AS "twoFactorEnabled"
      FROM users
      WHERE email = $1`,
-    [email]
+    [email],
   );
 
   return result.rows[0] ? normalizeUser(result.rows[0]) : null;
 }
 
-async function getUserWithSecretsByEmail(email: string): Promise<UserWithSecretsRow | null> {
+async function getUserWithSecretsByEmail(
+  email: string,
+): Promise<UserWithSecretsRow | null> {
   const result = await pool.query<UserWithSecretsRow>(
     `SELECT id, email, name, password_hash, email_verified_at AS "emailVerifiedAt",
             two_factor_enabled AS "twoFactorEnabled", two_factor_secret
      FROM users
      WHERE email = $1`,
-    [email]
+    [email],
   );
 
   return result.rows[0] ?? null;
 }
 
-async function getUserWithSecretsById(userId: string): Promise<UserWithSecretsRow | null> {
+async function getUserWithSecretsById(
+  userId: string,
+): Promise<UserWithSecretsRow | null> {
   const result = await pool.query<UserWithSecretsRow>(
     `SELECT id, email, name, password_hash, email_verified_at AS "emailVerifiedAt",
             two_factor_enabled AS "twoFactorEnabled", two_factor_secret
      FROM users
      WHERE id = $1`,
-    [userId]
+    [userId],
   );
 
   return result.rows[0] ?? null;
 }
 
-async function createAuthToken(userId: string, purpose: AuthTokenPurpose, ttlMs: number): Promise<string> {
+async function createAuthToken(
+  userId: string,
+  purpose: AuthTokenPurpose,
+  ttlMs: number,
+): Promise<string> {
   const token = crypto.randomBytes(32).toString("base64url");
   const tokenHash = hashToken(token);
   const expiresAt = new Date(Date.now() + ttlMs);
@@ -265,18 +322,21 @@ async function createAuthToken(userId: string, purpose: AuthTokenPurpose, ttlMs:
   await withTransaction(async (client) => {
     await client.query(
       "UPDATE auth_tokens SET consumed_at = now() WHERE user_id = $1 AND purpose = $2 AND consumed_at IS NULL",
-      [userId, purpose]
+      [userId, purpose],
     );
     await client.query(
       "INSERT INTO auth_tokens (user_id, token_hash, purpose, expires_at) VALUES ($1, $2, $3, $4)",
-      [userId, tokenHash, purpose, expiresAt]
+      [userId, tokenHash, purpose, expiresAt],
     );
   });
 
   return token;
 }
 
-async function consumeAuthToken(token: string, purpose: AuthTokenPurpose): Promise<string> {
+async function consumeAuthToken(
+  token: string,
+  purpose: AuthTokenPurpose,
+): Promise<string> {
   const tokenHash = hashToken(token);
   const result = await pool.query<{ id: string; user_id: string }>(
     `UPDATE auth_tokens
@@ -292,7 +352,7 @@ async function consumeAuthToken(token: string, purpose: AuthTokenPurpose): Promi
        LIMIT 1
      )
      RETURNING id, user_id`,
-    [tokenHash, purpose]
+    [tokenHash, purpose],
   );
 
   const tokenRow = result.rows[0];
@@ -308,13 +368,15 @@ async function createTwoFactorLoginChallenge(userId: string): Promise<string> {
   const challengeHash = hashToken(challengeToken);
   await pool.query(
     "INSERT INTO two_factor_login_challenges (user_id, challenge_hash, expires_at) VALUES ($1, $2, $3)",
-    [userId, challengeHash, new Date(Date.now() + TWO_FACTOR_CHALLENGE_TTL_MS)]
+    [userId, challengeHash, new Date(Date.now() + TWO_FACTOR_CHALLENGE_TTL_MS)],
   );
 
   return challengeToken;
 }
 
-async function consumeTwoFactorLoginChallenge(challengeToken: string): Promise<AuthUser> {
+async function consumeTwoFactorLoginChallenge(
+  challengeToken: string,
+): Promise<AuthUser> {
   const challengeHash = hashToken(challengeToken);
   const result = await pool.query<AuthUserRow>(
     `UPDATE two_factor_login_challenges
@@ -329,10 +391,12 @@ async function consumeTwoFactorLoginChallenge(challengeToken: string): Promise<A
        LIMIT 1
      )
      RETURNING user_id`,
-    [challengeHash]
+    [challengeHash],
   );
 
-  const challenge = result.rows[0] as unknown as { user_id: string } | undefined;
+  const challenge = result.rows[0] as unknown as
+    | { user_id: string }
+    | undefined;
   if (!challenge) {
     throw new HttpError(401, "Invalid or expired two-factor challenge");
   }
@@ -344,7 +408,7 @@ function verifyTotp(code: string, secret: string): boolean {
   return verifySync({
     secret,
     token: code.replace(/\s/g, ""),
-    epochTolerance: 30
+    epochTolerance: 30,
   }).valid;
 }
 
@@ -358,7 +422,7 @@ function normalizeUser(user: AuthUserRow): AuthUser {
     email: user.email,
     name: user.name,
     emailVerifiedAt: user.emailVerifiedAt,
-    twoFactorEnabled: user.twoFactorEnabled
+    twoFactorEnabled: user.twoFactorEnabled,
   };
 }
 
@@ -367,5 +431,10 @@ function authResponse(user: AuthUser) {
 }
 
 function isUniqueViolation(error: unknown): boolean {
-  return Boolean(error && typeof error === "object" && "code" in error && error.code === "23505");
+  return Boolean(
+    error &&
+    typeof error === "object" &&
+    "code" in error &&
+    error.code === "23505",
+  );
 }

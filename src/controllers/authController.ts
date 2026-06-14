@@ -204,14 +204,14 @@ export async function updatePasswordHandler(req: Request, res: Response, next: N
 
 export async function setupTwoFactor(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const setup = createTwoFactorSetup(req.user!);
+    const setup = await createTwoFactorSetup(req.user!);
     req.session.pendingTwoFactorSecret = setup.secret;
     req.session.save((error) => {
       if (error) {
         next(error);
         return;
       }
-      res.json(setup);
+      res.json({ qrCodeUrl: setup.qrCodeUrl });
     });
   } catch (error) {
     next(error);
