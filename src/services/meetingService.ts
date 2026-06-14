@@ -199,7 +199,7 @@ async function assertMeetingOwner(meetingId: string, userId?: string): Promise<v
   }
 }
 
-function dateFilterForQuery(query: string): { sql: string; values: unknown[] } {
+function dateFilterForQuery(query: string, offset: number): { sql: string; values: unknown[] } {
   const normalized = query.toLowerCase();
   const now = new Date();
 
@@ -210,14 +210,15 @@ function dateFilterForQuery(query: string): { sql: string; values: unknown[] } {
   const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
   const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   return {
-    sql: "AND m.meeting_date >= $3 AND m.meeting_date < $4",
+    sql: `AND m.meeting_date >= $${offset} AND m.meeting_date < $${offset + 1}`,
     values: [start, end]
   };
 }
 
 async function searchMeetingContext(userId: string, query: string, limit: number) {
-  const dateFilter = dateFilterForQuery(query);
-  const values = [userId, query, ...dateFilter.values];
+  const baseValues: unknown[] = [userId, query];
+  const dateFilter = dateFilterForQuery(query, baseValues.length + 1);
+  const values = [...baseValues, ...dateFilter.values];
   const result = await pool.query(
     `SELECT m.id AS "meetingId",
             m.title,
