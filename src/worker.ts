@@ -20,6 +20,15 @@ const worker = new Worker(
   }
 );
 
+async function shutdown() {
+  await worker.close();
+  await pool.end();
+  process.exit(0);
+}
+
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
+
 worker.on("completed", (job) => {
   logFlow("bullmq.meeting_processing.completed", {
     bullmqJobId: job.id,
