@@ -20,8 +20,7 @@ const allowedMimeTypes = new Set([
   "audio/x-wav",
   "audio/mp4",
   "audio/m4a",
-  "video/mp4",
-  "application/octet-stream"
+  "video/mp4"
 ]);
 
 const askSchema = z.object({
