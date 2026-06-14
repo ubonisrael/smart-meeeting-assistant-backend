@@ -23,37 +23,39 @@ export async function uploadMeeting(input: UploadMeetingInput) {
     sizeBytes: input.file.size
   });
 
-  const meeting = await withTransaction(async (client) => {
-    const meetingResult = await client.query<{ id: string }>(
-      `INSERT INTO meetings (user_id, title, status)
-       VALUES ($1, $2, 'uploaded')
-       RETURNING id`,
-      [input.user.id, title]
-    );
-    const meetingId = meetingResult.rows[0].id;
-    const storageKey = buildStorageKey(input.user.id, meetingId, input.file.originalname);
+  const meetingResult = await pool.query<{ id: string }>(
+    `INSERT INTO meetings (user_id, title, status)
+     VALUES ($1, $2, 'uploaded')
+     RETURNING id`,
+    [input.user.id, title]
+  );
+  const meetingId = meetingResult.rows[0].id;
+  const storageKey = buildStorageKey(input.user.id, meetingId, input.file.originalname);
 
-    logFlow("meeting.upload.storage_started", {
-      meetingId,
-      userId: input.user.id,
-      storageBucket: env.SUPABASE_STORAGE_BUCKET,
-      storageKey,
-      sizeBytes: input.file.size
-    });
+  logFlow("meeting.upload.storage_started", {
+    meetingId,
+    userId: input.user.id,
+    storageBucket: env.SUPABASE_STORAGE_BUCKET,
+    storageKey,
+    sizeBytes: input.file.size
+  });
 
-    await uploadRecording({
-      key: storageKey,
-      body: input.file.buffer,
-      contentType: input.file.mimetype || "application/octet-stream"
-    });
+  // S3 upload runs outside any transaction so the DB connection is not held
+  // open for the full duration of the upload.
+  await uploadRecording({
+    key: storageKey,
+    body: input.file.buffer,
+    contentType: input.file.mimetype || "application/octet-stream"
+  });
 
-    logFlow("meeting.upload.storage_completed", {
-      meetingId,
-      userId: input.user.id,
-      storageBucket: env.SUPABASE_STORAGE_BUCKET,
-      storageKey
-    });
+  logFlow("meeting.upload.storage_completed", {
+    meetingId,
+    userId: input.user.id,
+    storageBucket: env.SUPABASE_STORAGE_BUCKET,
+    storageKey
+  });
 
+  await withTransaction(async (client) => {
     await client.query(
       `INSERT INTO meeting_files
         (meeting_id, storage_bucket, storage_key, original_filename, mime_type, size_bytes)
@@ -67,33 +69,30 @@ export async function uploadMeeting(input: UploadMeetingInput) {
         input.file.size
       ]
     );
-
     await client.query("UPDATE meetings SET status = 'processing', updated_at = now() WHERE id = $1", [
       meetingId
     ]);
-
-    return { id: meetingId };
   });
 
-  const jobId = await enqueueMeetingProcessing(meeting.id);
+  const jobId = await enqueueMeetingProcessing(meetingId);
   logFlow("meeting.processing_job.queued", {
-    meetingId: meeting.id,
+    meetingId,
     bullmqJobId: jobId,
     queue: "meeting-processing"
   });
 
   await pool.query(
     "INSERT INTO processing_jobs (meeting_id, queue_job_id, status) VALUES ($1, $2, 'queued')",
-    [meeting.id, jobId]
+    [meetingId, jobId]
   );
 
   logFlow("meeting.upload.accepted", {
-    meetingId: meeting.id,
+    meetingId,
     status: "processing"
   });
 
   return {
-    meetingId: meeting.id,
+    meetingId,
     status: "processing"
   };
 }
