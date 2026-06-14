@@ -1,4 +1,4 @@
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { Readable } from "node:stream";
 import { env } from "../config/env.js";
 import { HttpError } from "../utils/errors.js";
@@ -57,6 +57,16 @@ export async function downloadRecording(key: string): Promise<Buffer> {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
   return Buffer.concat(chunks);
+}
+
+export async function deleteRecording(key: string): Promise<void> {
+  const client = createS3Client();
+  await client.send(
+    new DeleteObjectCommand({
+      Bucket: env.SUPABASE_STORAGE_BUCKET,
+      Key: key
+    })
+  );
 }
 
 export function buildStorageKey(userId: string, meetingId: string, filename: string): string {

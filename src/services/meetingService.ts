@@ -4,7 +4,7 @@ import { HttpError } from "../utils/errors.js";
 import { logFlow } from "../utils/logger.js";
 import { answerQuestion } from "./aiService.js";
 import { enqueueMeetingProcessing } from "./queueService.js";
-import { buildStorageKey, uploadRecording } from "./storageService.js";
+import { buildStorageKey, deleteRecording, uploadRecording } from "./storageService.js";
 
 type UploadMeetingInput = {
   user: AuthUser;
@@ -189,7 +189,17 @@ export async function askMeetings(userId: string, question: string) {
 
 export async function deleteMeeting(meetingId: string, userId: string): Promise<void> {
   await assertMeetingOwner(meetingId, userId);
+
+  const fileResult = await pool.query<{ storage_key: string }>(
+    "SELECT storage_key FROM meeting_files WHERE meeting_id = $1",
+    [meetingId]
+  );
+
   await pool.query("DELETE FROM meetings WHERE id = $1", [meetingId]);
+
+  for (const file of fileResult.rows) {
+    await deleteRecording(file.storage_key).catch(() => {});
+  }
 }
 
 async function assertMeetingOwner(meetingId: string, userId?: string): Promise<void> {
